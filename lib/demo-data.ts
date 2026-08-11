@@ -65,11 +65,31 @@ const categoryId = (name: string, type: "income" | "expense") =>
     (category) => category.name === name && category.type === type,
   )?.id ?? "expense-17";
 
-export const createDemoState = (): FamilyState => ({
+export const LEGACY_DEMO_OPERATION_IDS = [
+  "op-1",
+  "op-2",
+  "op-3",
+  "op-4",
+  "op-5",
+  "op-6",
+  "op-7",
+  "op-8",
+] as const;
+
+export const createEmptyState = (): FamilyState => ({
   baseCurrency: "USD",
   currentUser: "Иван",
   lastExport: null,
-  categories: defaultCategories,
+  categories: defaultCategories.map((category) => ({ ...category })),
+  operations: [],
+  budgets: [],
+  goals: [],
+  tasks: [],
+  notes: [],
+});
+
+export const createDemoState = (): FamilyState => ({
+  ...createEmptyState(),
   operations: [
     {
       id: "op-1",
