@@ -57,7 +57,11 @@ import {
   YAxis,
 } from "recharts";
 import { z } from "zod";
-import { createDemoState } from "@/lib/demo-data";
+import {
+  createDemoState,
+  createEmptyState,
+  LEGACY_DEMO_OPERATION_IDS,
+} from "@/lib/demo-data";
 import {
   CURRENCIES,
   convertCurrency,
@@ -176,7 +180,9 @@ const getErrorMessage = (error: unknown) => {
 };
 
 export default function FamilyCenter() {
-  const [state, setState] = useState<FamilyState>(() => createDemoState());
+  const [state, setState] = useState<FamilyState>(() =>
+    isSupabaseConfigured ? createEmptyState() : createDemoState(),
+  );
   const [section, setSection] = useState<AppSection>("dashboard");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [hydrated, setHydrated] = useState(false);
@@ -186,6 +192,7 @@ export default function FamilyCenter() {
   >(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cloudSession, setCloudSession] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
   const [rateSnapshot, setRateSnapshot] = useState<ExchangeRateSnapshot>({
     rates: FALLBACK_EXCHANGE_RATES,
     date: "загрузка",
@@ -237,6 +244,14 @@ export default function FamilyCenter() {
           const parsed = JSON.parse(saved) as FamilyState;
           setState({
             ...parsed,
+            operations: isSupabaseConfigured
+              ? parsed.operations.filter(
+                  (operation) =>
+                    !LEGACY_DEMO_OPERATION_IDS.some(
+                      (demoId) => demoId === operation.id,
+                    ),
+                )
+              : parsed.operations,
             budgets: parsed.budgets.map((budget) => ({
               ...budget,
               currency: budget.currency ?? "USD",
@@ -263,7 +278,7 @@ export default function FamilyCenter() {
   useEffect(() => {
     if (!hydrated) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if (cloudSession && isSupabaseConfigured) {
+    if (cloudSession && cloudReady && isSupabaseConfigured) {
       if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
       cloudSaveTimer.current = setTimeout(() => {
         saveFamilyToCloud(state).catch(() =>
@@ -274,7 +289,7 @@ export default function FamilyCenter() {
     return () => {
       if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     };
-  }, [state, hydrated, cloudSession, notify]);
+  }, [state, hydrated, cloudSession, cloudReady, notify]);
 
   useEffect(() => {
     if (!hydrated || ratesLoading) return;
@@ -318,11 +333,14 @@ export default function FamilyCenter() {
 
   useEffect(() => {
     const client = supabase;
-    if (!client) return;
+    if (!client || !hydrated) return;
     let active = true;
     const updateCloudSession = async (userId?: string) => {
       if (!userId) {
-        if (active) setCloudSession(false);
+        if (active) {
+          setCloudSession(false);
+          setCloudReady(false);
+        }
         return;
       }
       const { data, error } = await client
@@ -330,7 +348,24 @@ export default function FamilyCenter() {
         .select("id")
         .eq("user_id", userId)
         .maybeSingle();
-      if (active) setCloudSession(!error && Boolean(data));
+      if (!active) return;
+      if (error || !data) {
+        setCloudSession(false);
+        setCloudReady(false);
+        return;
+      }
+      try {
+        const cloud = await loadFamilyFromCloud(createEmptyState());
+        if (!active) return;
+        setState(cloud);
+        setCloudSession(true);
+        setCloudReady(true);
+      } catch (loadError) {
+        if (!active) return;
+        setCloudSession(false);
+        setCloudReady(false);
+        notify(getErrorMessage(loadError), "error");
+      }
     };
     client.auth
       .getSession()
@@ -342,7 +377,12 @@ export default function FamilyCenter() {
       active = false;
       data.subscription.unsubscribe();
     };
-  }, []);
+  }, [hydrated, notify]);
+
+  const handleCloudSession = (value: boolean) => {
+    setCloudSession(value);
+    setCloudReady(value);
+  };
 
   const updateState = (updater: (current: FamilyState) => FamilyState) =>
     setState((current) => updater(current));
@@ -430,7 +470,7 @@ export default function FamilyCenter() {
             theme={theme}
             setTheme={setTheme}
             cloudSession={cloudSession}
-            onCloudSession={setCloudSession}
+            onCloudSession={handleCloudSession}
             notify={notify}
           />
         );
@@ -3649,9 +3689,14 @@ function SettingsSection({
                 return;
               setResetBusy(true);
               try {
+                const restoredDemo = createDemoState();
                 const demoState = {
-                  ...createDemoState(),
+                  ...restoredDemo,
                   currentUser: state.currentUser,
+                  operations: restoredDemo.operations.map((operation) => ({
+                    ...operation,
+                    id: uid("operation"),
+                  })),
                 };
                 if (cloudSession) await replaceFamilyCloudData(demoState);
                 setState(() => demoState);
@@ -3927,15 +3972,20 @@ function CloudPanel({
       { family_name: "Иван & Алина", member_name: name },
     );
     if (rpcError) throw rpcError;
+    const familyState = {
+      ...createEmptyState(),
+      currentUser: name,
+      baseCurrency: state.baseCurrency,
+    };
     setFamilyCode(String(code));
+    setState(() => familyState);
     onCloudSession(true);
-    setState((current) => ({ ...current, currentUser: name }));
     try {
-      await saveFamilyToCloud({ ...state, currentUser: name });
+      await saveFamilyToCloud(familyState);
     } catch (error) {
-      const message = `Семья создана, но демоданные не перенесены: ${getErrorMessage(error)}`;
+      const message = `Семья создана, но начальные настройки не сохранены: ${getErrorMessage(error)}`;
       setSyncWarning(message);
-      notify("Семья создана. Демоданные можно сохранить позже", "error");
+      notify("Семья создана. Настройки можно сохранить позже", "error");
       return;
     }
     notify("Семейное пространство создано");
