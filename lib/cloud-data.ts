@@ -1,4 +1,5 @@
 import type { FamilyState } from "./types";
+import { LEGACY_DEMO_OPERATION_IDS } from "./demo-data";
 import { supabase } from "./supabase";
 
 async function getContext() {
@@ -35,6 +36,13 @@ export async function loadFamilyFromCloud(
   fallback: FamilyState,
 ): Promise<FamilyState> {
   const { client, familyId, displayName } = await getContext();
+  const { error: demoCleanupError } = await client
+    .from("transactions")
+    .delete()
+    .eq("family_id", familyId)
+    .in("id", [...LEGACY_DEMO_OPERATION_IDS]);
+  if (demoCleanupError) throw demoCleanupError;
+
   const [operations, budgets, goals, tasks, notes, categories, settings] =
     await Promise.all([
       client
