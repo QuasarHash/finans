@@ -743,23 +743,27 @@ function Dashboard({
     .filter((item) => item.status !== "done")
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .slice(0, 3);
-  const currencyBalances = CURRENCIES.map((currency) => {
-    const currencyOperations = state.operations.filter(
-      (operation) => operation.currency === currency,
-    );
-    const currencyIncome = currencyOperations
-      .filter((operation) => operation.type === "income")
-      .reduce((sum, operation) => sum + operation.amount, 0);
-    const currencyExpense = currencyOperations
-      .filter((operation) => operation.type === "expense")
-      .reduce((sum, operation) => sum + operation.amount, 0);
-    return {
+  const currencyBalances = CURRENCIES.map((currency) => ({
+    currency,
+    income: convertCurrency(
+      allIncome,
+      state.baseCurrency,
       currency,
-      income: currencyIncome,
-      expense: currencyExpense,
-      balance: currencyIncome - currencyExpense,
-    };
-  });
+      exchangeRates,
+    ),
+    expense: convertCurrency(
+      allExpense,
+      state.baseCurrency,
+      currency,
+      exchangeRates,
+    ),
+    balance: convertCurrency(
+      allIncome - allExpense,
+      state.baseCurrency,
+      currency,
+      exchangeRates,
+    ),
+  }));
 
   return (
     <div className="page-stack">
