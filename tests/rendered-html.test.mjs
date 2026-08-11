@@ -22,5 +22,6 @@ test("server-renders the family center", async () => {
   assert.match(html, /Иван &amp; Алина/);
   assert.match(html, /семейный центр/i);
   assert.match(html, /Главная/);
+  assert.doesNotMatch(html, /Основной проект|Аренда квартиры/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
